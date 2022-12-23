@@ -306,6 +306,58 @@ M.init = function(conf)
     register_client(sktd)
     return sktd
   end
+  M.grab_all = function(command, handles)
+    local function run_shell_nixio(command)
+      local out_r, out_w = nixio.pipe()
+      local err_r, err_w = nixio.pipe()
+      local in_r, in_w = nixio.pipe()
+      local retcode_r, retcode_w = nixio.pipe()
+      local childpid = nixio.fork()
+      assert(childpid ~= nil, errmsg)
+      if childpid > 0 then --parent
+        -- close unused pipe file descriptors
+        out_w:close(); err_w:close(); in_r:close(); retcode_w:close()
+        return {out_r=out_r, err_r=err_r, in_w=in_w, retcode_r=retcode_r}
+      else
+        local grandchildpid = nixio.fork()
+        assert(grandchildpid ~= nil, errmsg)
+        if grandchildpid > 0 then -- child
+          -- close unused pipe file descriptors
+          out_w:close(); err_w:close(); in_w:close()
+          out_r:close(); err_r:close(); in_r:close(); exit_r:close()
+          local _, _, exit_code = nixio.waitpid(grandchildpid)
+          exit_w:write(exit_code)
+          exit_w:close()
+          os.exit()
+        else -- grandchild
+          nixio.dup(out_w, nixio.stdout)
+          nixio.dup(err_w, nixio.stderr)
+          nixio.dup(in_r, nixio.stdin)
+          -- close unused pipe file descriptors
+          out_w:close(); err_w:close(); in_w:close(); exit_w:close()
+          out_r:close(); err_r:close(); in_r:close(); exit_r:close()
+          local _, err_code, err_string = nixio.exec("/bin/sh", "-c", command)
+          io.stderr:write(err_string)
+          os.exit(err_code)       
+        end
+      end
+    end
+    local descriptors = run_shell_nixio(command)
+    local sockets = {}
+    for k, v in pairs(descriptors) do
+      local sktd=init_sktd({
+        pattern =  normalize_pattern(handles[k].pattern),
+        handler = handles[k].handler,
+        fd = descriptors[k],
+      })
+      -- if not sktd.fd then return end
+      sktd.events = {data=sktd.fd}
+      if sktd.pattern=='*l' and handles[k].handler == 'stream' then sktd.pattern=nil end
+      register_client(sktd)
+      sockets[k] = sktd
+    end
+    return sockets, pid
+  end
   M.grab_stdout = function ( command, pattern, handler )
     local pid
     local function run_shell_nixio(command)

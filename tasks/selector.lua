@@ -86,6 +86,8 @@ M.init = function(conf)
 	-- If the handler parameter is nil, the socket object will emit signals. 
 	-- @return a @{sktd} object
 	M.new_fd = native.new_fd
+
+	M.grab_all = native.grab_all
 	
 	--- Grab the output of a command.
 	-- Usefull for capturing the output of long running programs.  
